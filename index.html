@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مفسر هوشمند جریان‌محور | Gemini 2.5</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100;400;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Vazirmatn', sans-serif; background-color: #0f172a; color: #f1f5f9; }
+        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .quran-text { font-family: 'Traditional Arabic', serif; font-size: 2.2rem; color: #fbbf24; line-height: 4rem; }
+        #interpretationContent strong { color: #10b981; font-weight: 800; }
+        .active-ayah { border: 2px solid #fbbf24; background: rgba(251, 191, 36, 0.1); }
+        input, select { background: #1e293b !important; color: white !important; border: 1px solid #334155 !important; }
+        .sidebar { width: 300px; }
+    </style>
+</head>
+<body class="flex min-h-screen">
+
+    <aside class="sidebar glass border-l border-slate-700 h-screen sticky top-0 p-6 flex flex-col gap-6">
+        <h2 class="text-xl font-bold text-amber-500 text-center border-b border-slate-700 pb-4">تنظیمات جریان</h2>
+        
+        <div class="space-y-4">
+            <div>
+                <label class="text-xs text-slate-400">Gemini API Key:</label>
+                <input type="password" id="apiKey" class="w-full p-2 mt-1 rounded-lg text-sm">
+            </div>
+
+            <div class="flex gap-2">
+                <div class="flex-1">
+                    <label class="text-xs text-slate-400">سوره:</label>
+                    <input type="number" id="surahNum" value="1" class="w-full p-2 rounded-lg">
+                </div>
+                <div class="w-1/4">
+                    <label class="text-xs text-slate-400">از:</label>
+                    <input type="number" id="startAyah" value="1" class="w-full p-2 rounded-lg">
+                </div>
+                <div class="w-1/4">
+                    <label class="text-xs text-slate-400">تا:</label>
+                    <input type="number" id="endAyah" value="5" class="w-full p-2 rounded-lg">
+                </div>
+            </div>
+
+            <div>
+                <label class="text-xs text-slate-400 block mb-1">سرعت بازخوانی تفسیر:</label>
+                <input type="range" id="speechRate" min="0.5" max="2" step="0.1" value="1" class="w-full accent-amber-500">
+                <div class="flex justify-between text-[10px] text-slate-500"><span>کند</span><span>عادی</span><span>تند</span></div>
+            </div>
+
+            <button onclick="startAutoFlow()" id="startBtn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-all">
+                <i data-lucide="play"></i> شروع جریان خودکار
+            </button>
+            
+            <button onclick="stopFlow()" class="w-full bg-red-900/40 hover:bg-red-800 text-red-200 py-2 rounded-xl text-sm transition-all">
+                توقف عملیات
+            </button>
+        </div>
+
+        <div class="mt-auto p-4 bg-slate-800/50 rounded-xl border border-slate-700">
+            <p class="text-[10px] text-slate-400 leading-relaxed">
+                وضعیت: <span id="statusLabel" class="text-emerald-400">آماده باش</span>
+            </p>
+        </div>
+    </aside>
+
+    <main class="flex-1 p-8 overflow-y-auto">
+        <div class="max-w-4xl mx-auto space-y-8">
+            <div id="currentAyahBox" class="glass p-10 rounded-[3rem] text-center hidden animate-pulse border-2 border-amber-500/50">
+                <div id="ayahLabel" class="text-sm text-amber-500 font-bold mb-4">آیه در حال پردازش...</div>
+                <div id="ayahText" class="quran-text"></div>
+            </div>
+
+            <div id="analysisBox" class="hidden glass p-8 rounded-3xl border-r-8 border-emerald-500 shadow-2xl space-y-6">
+                <div id="interpretationContent" class="text-slate-200 leading-loose text-lg text-justify"></div>
+                
+                <div id="ruleBox" class="p-6 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-400 text-xl italic text-center hidden"></div>
+            </div>
+
+            <div id="history" class="space-y-4 opacity-50">
+                <h3 class="text-slate-500 text-sm font-bold border-b border-slate-800 pb-2">تاریخچه این نشست</h3>
+                </div>
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+        let isRunning = false;
+        let currentAyahIndex = 1;
+        let endAyahIndex = 1;
+
+        async function startAutoFlow() {
+            if(isRunning) return;
+            const apiKey = document.getElementById('apiKey').value;
+            if(!apiKey) return alert("ابتدا API Key را وارد کنید.");
+            
+            isRunning = true;
+            currentAyahIndex = parseInt(document.getElementById('startAyah').value);
+            endAyahIndex = parseInt(document.getElementById('endAyah').value);
+            const surah = document.getElementById('surahNum').value;
+
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('startBtn').innerHTML = `<i class="animate-spin" data-lucide="loader-2"></i> در حال اجرا...`;
+            lucide.createIcons();
+
+            processNextAyah(surah);
+        }
+
+        function stopFlow() {
+            isRunning = false;
+            window.speechSynthesis.cancel();
+            location.reload(); // بازنشانی ساده
+        }
+
+        async function processNextAyah(surah) {
+            if(!isRunning || currentAyahIndex > endAyahIndex) {
+                updateStatus("پایان عملیات");
+                return;
+            }
+
+            updateStatus(`در حال دریافت آیه ${currentAyahIndex}...`);
+            const ayahBox = document.getElementById('currentAyahBox');
+            const ayahText = document.getElementById('ayahText');
+            const analysisBox = document.getElementById('analysisBox');
+            const interpretationContent = document.getElementById('interpretationContent');
+            
+            ayahBox.classList.remove('hidden');
+            ayahBox.classList.add('animate-pulse');
+
+            try {
+                // 1. دریافت متن آیه
+                const res = await fetch(`https://api.alquran.cloud/v1/ayah/${surah}:${currentAyahIndex}/editions/quran-simple`);
+                const data = await res.json();
+                const text = data.data[0].text;
+                ayahText.innerText = text;
+                document.getElementById('ayahLabel').innerText = `سوره ${surah} | آیه ${currentAyahIndex}`;
+
+                // 2. تفسیر توسط Gemini 2.5 Flash
+                updateStatus(`تفسیر آیه ${currentAyahIndex} توسط Gemini 2.5...`);
+                const prompt = `شما مفسر مستقل هستید. آیه زیر را فقط با عقل، علم و خود قرآن (بدون هیچ حدیثی) به فارسی روان تفسیر کنید. بخش‌های کلیدی را **bold** کنید. در انتها یک قانون کوتاه برای تعالی تمدن بنویسید. آیه: ${text}`;
+                
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${document.getElementById('apiKey').value}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const result = await response.json();
+                const interpretation = result.candidates[0].content.parts[0].text;
+
+                // 3. نمایش و رندر
+                ayahBox.classList.remove('animate-pulse');
+                analysisBox.classList.remove('hidden');
+                interpretationContent.innerHTML = marked.parse(interpretation);
+
+                // 4. تبدیل متن به گفتار (TTS)
+                updateStatus(`در حال بازخوانی تفسیر...`);
+                await speakText(interpretationContent.innerText);
+
+                // 5. انتقال به آیه بعدی بعد از اتمام خواندن
+                currentAyahIndex++;
+                processNextAyah(surah);
+
+            } catch (e) {
+                console.error(e);
+                updateStatus("خطا در پردازش. توقف...");
+            }
+        }
+
+        function speakText(text) {
+            return new Promise((resolve) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'fa-IR'; // تنظیم زبان بر روی فارسی
+                utterance.rate = parseFloat(document.getElementById('speechRate').value);
+                
+                utterance.onend = () => {
+                    resolve();
+                };
+                
+                window.speechSynthesis.speak(utterance);
+            });
+        }
+
+        function updateStatus(msg) {
+            document.getElementById('statusLabel').innerText = msg;
+        }
+    </script>
+</body>
+</html>
